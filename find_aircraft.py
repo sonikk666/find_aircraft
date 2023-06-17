@@ -8,18 +8,15 @@ from http import HTTPStatus
 import requests
 from bs4 import BeautifulSoup
 
-DEBUG = False
-LOGGING_LEVEL = logging.DEBUG if DEBUG else logging.INFO
+DEBUG = True
+RETRY_TIME = 600 if not DEBUG else 30
+LOGGING_LEVEL = logging.INFO if not DEBUG else logging.DEBUG
+AIRCRAFT_COUNT = 2  # используется, если DEBUG = True
 
-RETRY_TIME = 60
-AIRCRAFT_COUNT = 1  # используется, если DEBUG = True
-HEAD_URL = (
-    'https://www.flightradar24.com'
-)
+HEAD_URL = ('https://www.flightradar24.com')
+SERVER_IP = socket.gethostbyname(socket.gethostname())  # IP-адрес этой машины
+SERVER_PORT = 5050  # укажите желаемый открытый порт
 
-SERVER = socket.gethostbyname(socket.gethostname())  # IP-адрес этой машины
-PORT = 5050
-ADDRESS = (SERVER, PORT)
 # PATH_TO_LOG = '/home/<username>/<path_to_folder>/aircraft_logger.log'
 # PATH_TO_JSON = '/home/<username>/<path_to_folder>/data.json'
 PATH_TO_LOG = 'media/aircraft_logger.log'
@@ -28,17 +25,15 @@ PATH_TO_JSON = 'media/data.json'
 
 class AircraftError(Exception):
     """Общий класс ошибок Aircraft."""
-
     pass
 
 
 class SendError(AircraftError):
     """Общая ошибка передачи данных на сервер."""
-
     pass
 
 
-def get_logger():
+def get_logger() -> logging.Logger:
     """Задаём параметры логирования."""
     logger = logging.getLogger(__name__)
     logger.setLevel(LOGGING_LEVEL)
@@ -89,7 +84,7 @@ def get_new_soup(url: str) -> BeautifulSoup:
     if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         # Узнать количество времени для ожидания
         time_sleep = int(response.headers.get('Retry-After'))
-        logger.info(f'Time for sleep {time_sleep+1} sec')
+        logger.info(f'Too many requests - Time for sleep {time_sleep+1} sec')
         # Подождать нужное время
         time.sleep(time_sleep + 1)
         # Повторить запрос на тот же url
@@ -130,6 +125,7 @@ def parsing_aircraft_family(urls_aircraft_family: list[str]) -> list[dict]:
             reg_number = aircraft.string.strip()
             # Рег_номер самолётов Китая начинается с "B"
             if 'B-' in reg_number[0:2]:
+                n += 1
                 # Упаковать данные в словарь и добавить в список всех самолётов
                 # one_aircraft = reg_number, url_aircraft
                 one_aircraft = {
@@ -137,8 +133,7 @@ def parsing_aircraft_family(urls_aircraft_family: list[str]) -> list[dict]:
                     'url_aircraft': url_aircraft,
                 }
                 all_aircrafts.append(one_aircraft)
-                logger.debug(f'Нашли самолёт № {n+1}')
-                n += 1
+                logger.debug(f'Нашли самолёт № {n}')
                 if DEBUG and len(all_aircrafts) >= AIRCRAFT_COUNT:  # for debug
                     break  # for debug
         if DEBUG and len(all_aircrafts) >= AIRCRAFT_COUNT:  # for debug
@@ -148,7 +143,7 @@ def parsing_aircraft_family(urls_aircraft_family: list[str]) -> list[dict]:
 
 
 def get_all_aircrafts() -> list[dict]:
-    """Главная функция для получения списка всех самолётов.
+    """Функция для получения списка всех самолётов.
     Содержит словари с рег.номером самолёта и его url на сайте.
     """
     new_soup = get_new_soup(f'{HEAD_URL}/data/aircraft/')
@@ -219,29 +214,12 @@ def full_info_one_aircraft(one_aircraft: dict) -> dict:
     return one_aircraft
 
 
-def send_to_server(array):
-    try:
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.connect(ADDRESS)
-        # TODO: добавить len(array) в data
-        data = {
-            "type": "select_aircraft",
-            "result": array
-        }
-        data = json.dumps(data)
-        client.sendall(bytes(data, encoding="utf-8"))
-        client.close()
-    except ConnectionRefusedError as error:
-        logger.error(f'Сервер недоступен - {error}')
-
-
 @time_of_function
-def main():
-    """Основная логика работы программы."""
-    # Получить список словарей только с рег.номером и url самолётов
+def get_info_aircrafts() -> list[dict]:
+    """Наполняет список словарей самолётов всеми данными."""
+    # Получить список словарей самолётов с рег.номером и url
     all_aircrafts = get_all_aircrafts()
-    n = 0
-    for one_aircraft in all_aircrafts:
+    for n, one_aircraft in enumerate(all_aircrafts, start=0):
         # Получить полную информацию об одном самолёте
         full_info = full_info_one_aircraft(one_aircraft)
         # Обновить её в общем списке самолётов
@@ -256,32 +234,63 @@ def main():
         if (n + 1) % 10 == 0:
             logger.info(f'Собрали данные о самолёте № {n+1}')
         # Подождать перед переходом на страницу другого самолёта
-        n += 1
         time.sleep(5)
     return all_aircrafts
+
+
+def send_to_server(aircrafts_info: list[dict]) -> None:
+    """Отправка данных на сервер.
+    Принимает список словарей. Конвертирует в json перед отправкой.
+    """
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect((SERVER_IP, SERVER_PORT))
+        j_array = json.dumps(aircrafts_info)
+        len_bytes_array = len(bytes(j_array, encoding="utf-8"))
+        data = {
+            "type": "select_aircraft",
+            "result": aircrafts_info,
+            "length_array": len_bytes_array
+        }
+        json_data = json.dumps(data)
+        client.sendall(bytes(json_data, encoding="utf-8"))
+        client.close()
+    except Exception as error:
+        raise SendError(f'Сбой при отправке данных на сервер - {error}')
+
+
+def main():
+    """Основная логика работы программы."""
+    # Зацикливаем программу c работой по таймеру
+    n = 0
+    while True:
+        try:
+            logger.info('======START program=======')
+            aircrafts_info = get_info_aircrafts()
+            send_to_server(aircrafts_info)
+        except SendError as error:
+            logger.error(f'SendError: {error}')
+        except Exception as error:
+            logger.error(f'Сбой в работе программы: {error}')
+        finally:
+            n += 1
+            logger.info('=======END program=======')
+            logger.info(f'Прошёл запуск программы № {n}')
+            if DEBUG and n == 3:
+                exit()  # for debug
+            logger.info(
+                f'Подождать перед повторением программы - {RETRY_TIME} сек'
+            )
+            time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':
     logger = get_logger()
     try:
-        n = 0
-        # Зацикливаем программу для работы по таймеру
-        while True:
-            logger.info('======START program=======')
-            to_json = main()
-            send_to_server(to_json)
-            n += 1
-            logger.info(f'Прошёл запуск программы № {n}')
-            logger.info('=======END program=======')
-            if DEBUG and n == 3:
-                exit()  # for debug
-            logger.info(
-                f'Подождать {RETRY_TIME} сек перед повторением программы'
-            )
-            time.sleep(RETRY_TIME)
+        if DEBUG:
+            logger.critical(f'!!! DEBUG !!! САМОЛЁТОВ = {AIRCRAFT_COUNT} шт')
+        main()
     except KeyboardInterrupt:
         logger.info('Exit to Ctrl+C!')
         # TODO: попробовать сделать отправку json
         sys.exit(0)
-    except Exception as error:
-        logger.error(error)

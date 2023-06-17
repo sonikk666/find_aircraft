@@ -1,0 +1,16 @@
+[Unit]
+Description=Find aircraft service
+After=multi-user.target network.target
+
+[Service]
+#User=<username>  # будет выполняться только от имени пользователя <username>
+#Group=<groupname>  # входящего в группу <groupname>
+Type=simple
+Restart=always
+RestartSec=15
+
+ExecStart=/home/<username>/<path_to_folder>/find_aircraft/venv/bin/python /home/<username>/<path_to_folder>/find_aircraft/find_aircraft.py
+
+[Install]
+WantedBy=multi-user.target
+
