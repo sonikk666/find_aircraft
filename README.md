@@ -23,15 +23,16 @@ P.S.: принадлежность стране определяется по п
 - запустить проект в dev-режиме для установки зависимостей в виртуальном окружении (смотрите ниже)
 - отредактировать файл find_aircraft.service, указав в нём путь к развёрнутому проекту
 - поместить файл find_aircraft.service в папку /etc/systemd/system/
+- затем выполнить последовательно команды:
 
-Затем выполнить последовательно команды:
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable find_aircraft.service
+    sudo systemctl start find_aircraft.service
+    sudo systemctl status find_aircraft.service
+    ```
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable find_aircraft.service
-sudo systemctl start find_aircraft.service
-sudo systemctl status find_aircraft.service
-```
+- запустить файл AircraftUI (при условии установленного Qt)
 
 Для Windows - смотрите Запуск в dev-режиме
 
