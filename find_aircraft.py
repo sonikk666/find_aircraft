@@ -34,7 +34,7 @@ class SendError(AircraftError):
 
 
 def get_logger() -> logging.Logger:
-    """Задаём параметры логирования."""
+    """Задаются параметры логирования."""
     logger = logging.getLogger(__name__)
     logger.setLevel(LOGGING_LEVEL)
     fileHandler = logging.FileHandler(
