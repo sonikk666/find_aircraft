@@ -8,8 +8,8 @@ from http import HTTPStatus
 import requests
 from bs4 import BeautifulSoup
 
-DEBUG = True
-RETRY_TIME = 600 if not DEBUG else 30
+DEBUG = False
+RETRY_TIME = 600 if not DEBUG else 10
 LOGGING_LEVEL = logging.INFO if not DEBUG else logging.DEBUG
 AIRCRAFT_COUNT = 2  # используется, если DEBUG = True
 
